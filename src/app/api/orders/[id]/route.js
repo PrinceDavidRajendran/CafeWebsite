@@ -23,7 +23,12 @@ export async function PATCH(request, { params }) {
     await dbConnect();
     const order = await Order.findByIdAndUpdate(
       id,
-      { status: body.status },
+      {
+        status: body.status,
+        // Stamp serve time for future fulfilment-time stats; clear it on Undo
+        // so a re-served order measures its latest cycle.
+        servedAt: body.status === "served" ? new Date() : null,
+      },
       { new: true }
     );
 

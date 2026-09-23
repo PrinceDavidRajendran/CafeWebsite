@@ -4,7 +4,7 @@ import dbConnect from "@/lib/mongodb";
 import Order, { TAG_PRIORITY } from "@/lib/Order";
 import { requireSessionUser } from "@/lib/session";
 import { nextSequence } from "@/lib/Counter";
-import { startOfUTCDay } from "@/lib/day";
+import { awstDateParts, startOfAWSTDay } from "@/lib/day";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export async function GET() {
   try {
     await requireSessionUser(["admin", "waiter"]);
     await dbConnect();
-    const start = startOfUTCDay(new Date());
+    const start = startOfAWSTDay(new Date());
 
     const orders = await Order.find({ status: "pending" })
       .sort({ priority: 1, createdAt: 1 })
@@ -92,10 +92,7 @@ export async function POST(request) {
 
     await dbConnect();
 
-    const start = startOfUTCDay(new Date());
-    const y = start.getUTCFullYear();
-    const m = String(start.getUTCMonth() + 1).padStart(2, "0");
-    const dt = String(start.getUTCDate()).padStart(2, "0");
+    const { y, m, dt } = awstDateParts(new Date());
     const orderNumber = await nextSequence(`orders:${y}-${m}-${dt}`);
 
     const order = await Order.create({

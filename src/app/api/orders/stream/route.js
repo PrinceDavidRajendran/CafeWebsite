@@ -2,7 +2,7 @@ import { jwtVerify } from "jose";
 import dbConnect from "@/lib/mongodb";
 import Order from "@/lib/Order";
 import { SESSION_COOKIE } from "@/lib/session";
-import { startOfUTCDay } from "@/lib/day";
+import { startOfAWSTDay } from "@/lib/day";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -50,7 +50,7 @@ export async function GET(request) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          const start = startOfUTCDay(new Date());
+            const start = startOfAWSTDay(new Date());
           const orders = await Order.find({ status: "pending" })
             .sort({ priority: 1, createdAt: 1 })
             .lean();
@@ -76,7 +76,7 @@ export async function GET(request) {
             return;
           }
           try {
-            const start = startOfUTCDay(new Date());
+          const start = startOfAWSTDay(new Date());
             const currentOrders = await Order.find({ status: "pending" })
               .sort({ priority: 1, createdAt: 1 })
               .lean();
