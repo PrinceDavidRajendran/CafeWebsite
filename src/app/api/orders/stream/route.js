@@ -54,6 +54,9 @@ export async function GET(request) {
           const orders = await Order.find({ status: "pending" })
             .sort({ priority: 1, createdAt: 1 })
             .lean();
+          const completedOrders = await Order.find({ status: "completed" })
+            .sort({ priority: 1, createdAt: 1 })
+            .lean();
           const servedOrders = await Order.find({
             status: "served",
             createdAt: { $gte: start },
@@ -62,7 +65,7 @@ export async function GET(request) {
             .lean();
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ type: "init", orders, servedOrders })}\n\n`
+              `data: ${JSON.stringify({ type: "init", orders, completedOrders, servedOrders })}\n\n`
             )
           );
         } catch {
@@ -80,6 +83,9 @@ export async function GET(request) {
             const currentOrders = await Order.find({ status: "pending" })
               .sort({ priority: 1, createdAt: 1 })
               .lean();
+            const currentCompleted = await Order.find({ status: "completed" })
+              .sort({ priority: 1, createdAt: 1 })
+              .lean();
             const currentServed = await Order.find({
               status: "served",
               createdAt: { $gte: start },
@@ -88,7 +94,7 @@ export async function GET(request) {
               .lean();
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ type: "update", orders: currentOrders, servedOrders: currentServed })}\n\n`
+                `data: ${JSON.stringify({ type: "update", orders: currentOrders, completedOrders: currentCompleted, servedOrders: currentServed })}\n\n`
               )
             );
           } catch {

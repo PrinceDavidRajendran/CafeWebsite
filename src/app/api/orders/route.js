@@ -21,6 +21,10 @@ export async function GET() {
       .sort({ priority: 1, createdAt: 1 })
       .lean();
 
+    const completedOrders = await Order.find({ status: "completed" })
+      .sort({ priority: 1, createdAt: 1 })
+      .lean();
+
     const servedOrders = await Order.find({
       status: "served",
       createdAt: { $gte: start },
@@ -28,7 +32,7 @@ export async function GET() {
       .sort({ priority: 1, createdAt: 1 })
       .lean();
 
-    return NextResponse.json({ orders, servedOrders });
+    return NextResponse.json({ orders, completedOrders, servedOrders });
   } catch (err) {
     if (err && typeof err.status === "number") {
       return NextResponse.json(

@@ -14,6 +14,29 @@ const TAG_CONFIG = {
 
 const TAG_ORDER = ["Guest", "Pastor", "Elder", "Adult", "Youth", "Children"];
 
+// Two production stations. The board is split so each team only sees the
+// drinks it is responsible for, still ordered by tag priority within a station.
+const STATION_DRINKS = {
+  "Chocolate & Milo": ["hot chocolate", "iced chocolate", "iced milo"],
+  "Coffee & Tea": null, // null === everything else
+};
+
+const STATION_ORDER = ["Chocolate & Milo", "Coffee & Tea"];
+
+const STATION_CONFIG = {
+  "Chocolate & Milo": { dot: "var(--color-caramel)", glyph: "🍫" },
+  "Coffee & Tea": { dot: "var(--color-tag-elder)", glyph: "☕" },
+};
+
+function stationOf(drink) {
+  const n = (drink || "").toLowerCase();
+  for (const station of STATION_ORDER) {
+    const drinks = STATION_DRINKS[station];
+    if (drinks && drinks.includes(n)) return station;
+  }
+  return STATION_ORDER[1];
+}
+
 function timeAgo(dateStr) {
   const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
   if (diff < 60) return "just now";
@@ -40,14 +63,18 @@ export default function DisplayPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [completedOrders, setCompletedOrders] = useState([]);
   const [servedOrders, setServedOrders] = useState([]);
-  const [activeTab, setActiveTab] = useState("active");
+  const [activeTab, setActiveTab] = useState("pending");
   const [connected, setConnected] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   // Kitchen readability mode: bigger ticket type for wall-mounted tablets
   // viewed at a distance. Persisted per device.
   const [largeText, setLargeText] = useState(false);
+  // Stations a team isn't working on (see STATION_DRINKS) can be collapsed so
+  // their board shows only their own drinks. Persisted per device.
+  const [collapsedStations, setCollapsedStations] = useState({});
   const [clock, setClock] = useState(null);
   const eventSourceRef = useRef(null);
 
@@ -87,6 +114,7 @@ export default function DisplayPage() {
           const data = JSON.parse(event.data);
           if (data.type === "init" || data.type === "update") {
             setOrders(data.orders);
+            setCompletedOrders(data.completedOrders || []);
             setServedOrders(data.servedOrders || []);
           }
         } catch {
@@ -115,6 +143,10 @@ export default function DisplayPage() {
   useEffect(() => {
     try {
       if (localStorage.getItem("cafe-display-large") === "1") setLargeText(true);
+      const stored = JSON.parse(localStorage.getItem("cafe-display-collapsed") || "[]");
+      if (Array.isArray(stored)) {
+        setCollapsedStations(Object.fromEntries(stored.map((k) => [k, true])));
+      }
     } catch {
       // private mode etc — stay default
     }
@@ -141,22 +173,38 @@ export default function DisplayPage() {
     }
   }
 
-  async function markServed(id) {
-    // Optimistically move the order from pending to served so it appears in the
-    // Served tab instantly. The PATCH is fired first; if it fails, SSE will
-    // re-sync the real state on its next poll.
-    const order = orders.find((o) => o._id === id);
+  function toggleStation(key) {
+    setCollapsedStations((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem(
+          "cafe-display-collapsed",
+          JSON.stringify(Object.keys(next).filter((k) => next[k]))
+        );
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }
+
+  async function markStatus(id, from, to) {
+    // Optimistically move the ticket to its new bucket so the board reacts
+    // instantly. The PATCH is fired first; if it fails, SSE re-syncs the real
+    // state on its next poll.
+    const source = { pending: orders, completed: completedOrders, served: servedOrders }[from];
+    const order = source.find((o) => o._id === id);
     if (order) {
-      setOrders((prev) => prev.filter((o) => o._id !== id));
-      setServedOrders((prev) =>
-        prev.some((o) => o._id === id) ? prev : [...prev, { ...order, status: "served" }]
+      setList(from, (prev) => prev.filter((o) => o._id !== id));
+      setList(to, (prev) =>
+        prev.some((o) => o._id === id) ? prev : [...prev, { ...order, status: to }]
       );
     }
     try {
       const res = await fetch(`/api/orders/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "served" }),
+        body: JSON.stringify({ status: to }),
       });
       if (res.status === 401) {
         router.push("/");
@@ -166,38 +214,60 @@ export default function DisplayPage() {
     }
   }
 
-  async function markPending(id) {
-    // Optimistically move the order back to pending (Undo). Mirror of markServed.
-    const order = servedOrders.find((o) => o._id === id);
-    if (order) {
-      setServedOrders((prev) => prev.filter((o) => o._id !== id));
-      setOrders((prev) =>
-        prev.some((o) => o._id === id) ? prev : [...prev, { ...order, status: "pending" }]
-      );
-    }
-    try {
-      const res = await fetch(`/api/orders/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "pending" }),
-      });
-      if (res.status === 401) {
-        router.push("/");
-      }
-    } catch {
-      // SSE will correct
-    }
+  function setList(bucket, updater) {
+    const setter = {
+      pending: setOrders,
+      completed: setCompletedOrders,
+      served: setServedOrders,
+    }[bucket];
+    setter(updater);
   }
 
-  const displayOrders = activeTab === "active" ? orders : servedOrders;
+  const markCompleted = (id) => markStatus(id, "pending", "completed");
+  const markServed = (id) => markStatus(id, "completed", "served");
+  const undoCompleted = (id) => markStatus(id, "completed", "pending");
+  const undoServed = (id) => markStatus(id, "served", "completed");
 
-  const grouped = TAG_ORDER.map((tagName) => ({
-    tag: tagName,
-    config: TAG_CONFIG[tagName],
-    orders: displayOrders.filter((o) => o.tag === tagName),
-  })).filter((group) => group.orders.length > 0);
+  const displayOrders =
+    activeTab === "pending"
+      ? orders
+      : activeTab === "completed"
+        ? completedOrders
+        : servedOrders;
 
-  const waiterCounts = [...orders, ...servedOrders].reduce((acc, o) => {
+  // Served tickets are a historical archive — keep the flat tag view there and
+  // only split the live boards (pending / completed) by station.
+  const stations =
+    activeTab === "served"
+      ? [
+          {
+            key: "all",
+            label: "Service log",
+            config: STATION_CONFIG["Coffee & Tea"],
+            groups: TAG_ORDER.map((tagName) => ({
+              key: tagName,
+              tag: tagName,
+              config: TAG_CONFIG[tagName],
+              orders: displayOrders.filter((o) => o.tag === tagName),
+            })).filter((g) => g.orders.length > 0),
+          },
+        ]
+      : STATION_ORDER.map((stationName) => {
+          const stationOrders = displayOrders.filter((o) => stationOf(o.drink) === stationName);
+          return {
+            key: stationName,
+            label: stationName,
+            config: STATION_CONFIG[stationName],
+            groups: TAG_ORDER.map((tagName) => ({
+              key: tagName,
+              tag: tagName,
+              config: TAG_CONFIG[tagName],
+              orders: stationOrders.filter((o) => o.tag === tagName),
+            })).filter((g) => g.orders.length > 0),
+          };
+        }).filter((s) => s.groups.length > 0);
+
+  const waiterCounts = [...orders, ...completedOrders, ...servedOrders].reduce((acc, o) => {
     const key = o.waiterName || o.waiterUsername || "Unknown";
     acc[key] = (acc[key] || 0) + 1;
     return acc;
@@ -326,13 +396,11 @@ export default function DisplayPage() {
 
         {/* Stat strip */}
         <div className="relative px-6 md:px-10 py-4 border-t border-foam/60 max-w-[1600px] mx-auto">
-          <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Stat label="Pending" value={orders.length} accent />
+            <Stat label="Ready" value={completedOrders.length} />
             <Stat label="Served today" value={servedOrders.length} />
-            <Stat label="Total" value={orders.length + servedOrders.length} />
-            <div className="hidden md:flex items-end justify-end">
-              <span className="label-mono">Sorted by priority</span>
-            </div>
+            <Stat label="Total" value={orders.length + completedOrders.length + servedOrders.length} />
           </div>
           {Object.keys(waiterCounts).length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
@@ -348,16 +416,22 @@ export default function DisplayPage() {
 
         {/* Tabs */}
         <div className="relative px-6 md:px-10 border-t border-foam max-w-[1600px] mx-auto">
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <TabButton
-              active={activeTab === "active"}
-              onClick={() => setActiveTab("active")}
+              active={activeTab === "pending"}
+              onClick={() => setActiveTab("pending")}
               label="Pending"
               count={orders.length}
             />
             <TabButton
-              active={activeTab === "finished"}
-              onClick={() => setActiveTab("finished")}
+              active={activeTab === "completed"}
+              onClick={() => setActiveTab("completed")}
+              label="Completed"
+              count={completedOrders.length}
+            />
+            <TabButton
+              active={activeTab === "served"}
+              onClick={() => setActiveTab("served")}
               label="Served"
               count={servedOrders.length}
             />
@@ -371,48 +445,99 @@ export default function DisplayPage() {
           <EmptyState mode={activeTab} />
         ) : (
           <div className="space-y-14">
-            {grouped.map((group, gi) => (
-              <div key={group.tag} className="rise" style={{ animationDelay: `${gi * 60}ms` }}>
-                {/* Group masthead */}
-                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2 mb-6">
+            {stations.map((station, si) => {
+              const stationCount = station.groups.reduce((n, g) => n + g.orders.length, 0);
+              const isCollapsed = !!collapsedStations[station.key];
+              const panelId = `station-panel-${station.key.replace(/\W+/g, "-").toLowerCase()}`;
+
+              return (
+              <div key={station.key} className="rise" style={{ animationDelay: `${si * 60}ms` }}>
+                {/* Station masthead — one team works this column; tap to minimise */}
+                <button
+                  type="button"
+                  onClick={() => toggleStation(station.key)}
+                  aria-expanded={!isCollapsed}
+                  aria-controls={panelId}
+                  title={isCollapsed ? `Show ${station.label} orders` : `Minimise ${station.label}`}
+                  className="w-full flex flex-wrap items-baseline gap-x-4 gap-y-2 mb-6 text-left
+                             rounded-2xl px-3 py-2 -mx-3 transition-colors
+                             hover:bg-paper/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-terracotta/50"
+                >
                   <span
                     className="block w-4 h-4 rounded-full shrink-0 shadow-[0_0_0_5px_color-mix(in_srgb,currentColor_15%,transparent)]"
-                    style={{ background: group.config.dot, color: group.config.dot }}
+                    style={{ background: station.config.dot, color: station.config.dot }}
                   />
                   <h2 className="font-display italic text-3xl md:text-4xl leading-none text-espresso">
-                    {group.tag}
+                    <span aria-hidden className="mr-1">{station.config.glyph}</span>
+                    {station.label}
                   </h2>
                   <span className="label-mono">
-                    {group.orders.length} order
-                    {group.orders.length !== 1 ? "s" : ""}
+                    {stationCount} order{stationCount !== 1 ? "s" : ""}
                   </span>
+                  {isCollapsed && stationCount > 0 && (
+                    <span className="chip border-terracotta text-terracotta-deep">{stationCount} waiting</span>
+                  )}
                   <div className="flex-1 h-px bg-foam" />
-                  <span className="label-mono">Priority · 0{group.config.priority}</span>
-                </div>
+                  <span
+                    className="inline-flex items-center gap-1.5 label-mono text-mocha"
+                    aria-hidden
+                  >
+                    {isCollapsed ? "Show" : "Minimise"}
+                    <span className={`transition-transform duration-200 ${isCollapsed ? "rotate-180" : ""}`}>
+                      ⌃
+                    </span>
+                  </span>
+                </button>
 
-                {/* Order tickets — fewer, roomier columns in large-text mode */}
-                <div
-                  className={`grid grid-cols-1 gap-4 ${
-                    largeText
-                      ? "sm:grid-cols-2 xl:grid-cols-3"
-                      : "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                  }`}
-                >
-                  {group.orders.map((order, oi) => (
-                    <OrderTicket
-                      key={order._id}
-                      order={order}
-                      dot={group.config.dot}
-                      mode={activeTab}
-                      large={largeText}
-                      onServed={markServed}
-                      onUndo={markPending}
-                      delay={oi * 40}
-                    />
+                <div id={panelId} hidden={isCollapsed}>
+                <div className="space-y-10">
+                  {station.groups.map((group, gi) => (
+                    <div key={group.key}>
+                      {/* Tag priority band */}
+                      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2 mb-4 pl-1">
+                        <span
+                          className="block w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ background: group.config.dot }}
+                        />
+                        <h3 className="font-ui text-sm font-semibold uppercase tracking-[0.18em] text-espresso-soft">
+                          {group.tag}
+                        </h3>
+                        <span className="label-mono">
+                          {group.orders.length} order{group.orders.length !== 1 ? "s" : ""}
+                        </span>
+                        <div className="flex-1 h-px bg-foam/60" />
+                        <span className="label-mono">Priority · 0{group.config.priority}</span>
+                      </div>
+
+                      {/* Order tickets — fewer, roomier columns in large-text mode */}
+                      <div
+                        className={`grid grid-cols-1 gap-4 ${
+                          largeText
+                            ? "sm:grid-cols-2 xl:grid-cols-3"
+                            : "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                        }`}
+                      >
+                        {group.orders.map((order, oi) => (
+                          <OrderTicket
+                            key={order._id}
+                            order={order}
+                            dot={group.config.dot}
+                            mode={activeTab}
+                            large={largeText}
+                            onCompleted={markCompleted}
+                            onServed={markServed}
+                            onUndo={activeTab === "served" ? undoServed : undoCompleted}
+                            delay={(si * 2 + gi) * 40 + oi * 40}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
+                </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
@@ -421,7 +546,9 @@ export default function DisplayPage() {
       <footer className="border-t border-foam px-6 md:px-10 py-5 flex items-center justify-between max-w-[1600px] mx-auto w-full">
         <span className="label-mono">© Good News Cafe · {new Date().getFullYear()}</span>
         <span className="label-mono">
-          {activeTab === "active" ? "Sorted by priority, then arrival" : "Sorted by service order"}
+          {activeTab === "served"
+            ? "Sorted by service order"
+            : "Station first, then priority, then arrival"}
         </span>
       </footer>
     </main>
@@ -464,35 +591,48 @@ function TabButton({ active, onClick, label, count }) {
 }
 
 function EmptyState({ mode }) {
+  const copy = {
+    pending: {
+      glyph: "☀️",
+      title: "All clear",
+      body: "New orders will appear here the moment they're filed.",
+    },
+    completed: {
+      glyph: "🍫",
+      title: "Nothing waiting",
+      body: "Once the kitchen marks a drink completed, it will wait here for a waiter.",
+    },
+    served: {
+      glyph: "🫖",
+      title: "Nothing served yet",
+      body: "Once you mark orders as served, they'll be archived here.",
+    },
+  }[mode] || { glyph: "☕", title: "Nothing here", body: "No orders to show." };
+
   return (
     <div className="flex-1 flex items-center justify-center min-h-[55vh]">
       <div className="text-center max-w-md fade">
         <div className="mx-auto w-20 h-20 rounded-full bg-paper border border-foam flex items-center justify-center mb-6 shadow-lg">
           <span className="text-4xl" aria-hidden>
-            {mode === "active" ? "☀️" : "🫖"}
+            {copy.glyph}
           </span>
         </div>
-        <h3 className="font-display italic text-4xl mb-3 text-espresso">
-          {mode === "active" ? "All clear" : "Nothing served yet"}
-        </h3>
-        <p className="font-ui text-base text-mocha leading-snug">
-          {mode === "active"
-            ? "New orders will appear here the moment they're filed."
-            : "Once you mark orders as served, they'll be archived here."}
-        </p>
+        <h3 className="font-display italic text-4xl mb-3 text-espresso">{copy.title}</h3>
+        <p className="font-ui text-base text-mocha leading-snug">{copy.body}</p>
       </div>
     </div>
   );
 }
 
-function OrderTicket({ order, dot, mode, large = false, onServed, onUndo, delay }) {
-  const isServed = mode !== "active";
+function OrderTicket({ order, dot, mode, large = false, onCompleted, onServed, onUndo, delay }) {
+  const isDone = mode === "served";
+  const isReady = mode === "completed";
 
   return (
     <article
       className={`relative card flex flex-col group transition-transform duration-300 hover:-translate-y-1 ticket-in ${
         large ? "p-6 md:p-7" : "p-5"
-      } ${isServed ? "opacity-75" : ""}`}
+      } ${isDone ? "opacity-75" : ""}`}
       style={{ animationDelay: `${delay}ms` }}
     >
       {/* Accent edge */}
@@ -526,6 +666,11 @@ function OrderTicket({ order, dot, mode, large = false, onServed, onUndo, delay 
           style={{ background: dot }}
         />
         <span className="label-mono">{order.tag}</span>
+        {isReady && (
+          <span className="inline-flex chip border-success text-success" title="Made by the kitchen, waiting for a waiter">
+            <span aria-hidden>✓</span> Ready
+          </span>
+        )}
       </div>
 
       <div className="rule-dashed mb-4 ml-5" />
@@ -572,21 +717,44 @@ function OrderTicket({ order, dot, mode, large = false, onServed, onUndo, delay 
 
       {/* Foot */}
       <div className="mt-3 pt-3 border-t border-foam flex flex-col gap-2 pl-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="label-mono">{timeAgo(order.createdAt)}</span>
-          {!isServed ? (
+          {mode === "pending" ? (
             <button
-              onClick={() => onServed(order._id)}
-              className="inline-flex items-center justify-center gap-2 px-5 min-h-[48px] rounded-full bg-success text-cream
+              onClick={() => onCompleted(order._id)}
+              className="inline-flex items-center justify-center gap-2 px-5 min-h-[48px] rounded-full bg-caramel text-cream
                        font-ui text-sm font-semibold uppercase tracking-wider
                        hover:brightness-110 active:scale-95 transition"
             >
-              Mark served
+              Completed
               <span aria-hidden>✓</span>
             </button>
+          ) : mode === "completed" ? (
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
+              <button
+                onClick={() => onUndo(order._id)}
+                title="Send back to the kitchen queue"
+                className="inline-flex items-center justify-center gap-2 px-4 min-h-[48px] rounded-full bg-paper border border-foam text-espresso
+                         font-ui text-sm font-semibold uppercase tracking-wider
+                         hover:bg-espresso hover:text-cream hover:border-espresso active:scale-95 transition"
+              >
+                Undo
+                <span aria-hidden>↺</span>
+              </button>
+              <button
+                onClick={() => onServed(order._id)}
+                className="inline-flex items-center justify-center gap-2 px-5 min-h-[48px] rounded-full bg-success text-cream
+                         font-ui text-sm font-semibold uppercase tracking-wider
+                         hover:brightness-110 active:scale-95 transition"
+              >
+                Served
+                <span aria-hidden>✓</span>
+              </button>
+            </div>
           ) : (
             <button
               onClick={() => onUndo(order._id)}
+              title="Move back to the Ready list"
               className="inline-flex items-center justify-center gap-2 px-5 min-h-[48px] rounded-full bg-paper border border-foam text-espresso
                        font-ui text-sm font-semibold uppercase tracking-wider
                        hover:bg-espresso hover:text-cream hover:border-espresso active:scale-95 transition"

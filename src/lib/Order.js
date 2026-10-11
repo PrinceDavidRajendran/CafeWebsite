@@ -39,10 +39,15 @@ const OrderSchema = new mongoose.Schema({
   status: {
     type: String,
     required: true,
-    enum: ["pending", "served"],
+    // pending   -> filed, kitchen still to make it
+    // completed -> kitchen made it, waiting at the counter for a waiter
+    // served    -> handed over to a waiter
+    enum: ["pending", "completed", "served"],
     default: "pending",
   },
-  // When the order was marked served (null while pending / after Undo).
+  // When the kitchen marked the drink completed (null while pending / after Undo).
+  completedAt: { type: Date, default: null },
+  // When the order was marked served (null until handed to a waiter / after Undo).
   // Together with createdAt this gives per-drink fulfilment time for
   // future stats (e.g. average make time per drink/size).
   servedAt: { type: Date, default: null },
@@ -56,7 +61,10 @@ OrderSchema.pre("validate", function () {
 });
 
 OrderSchema.index({ status: 1, priority: 1, createdAt: 1 });
+OrderSchema.index({ status: 1, completedAt: 1 });
 OrderSchema.index({ status: 1, servedAt: 1 });
+
+export const ORDER_STATUSES = ["pending", "completed", "served"];
 
 export { TAG_PRIORITY };
 export default mongoose.models.Order || mongoose.model("Order", OrderSchema);

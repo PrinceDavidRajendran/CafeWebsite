@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import dbConnect from "@/lib/mongodb";
-import Order from "@/lib/Order";
+import Order, { ORDER_STATUSES } from "@/lib/Order";
 import { requireSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -16,21 +16,28 @@ export async function PATCH(request, { params }) {
     }
 
     const body = await request.json().catch(() => ({}));
-    if (body.status !== "pending" && body.status !== "served") {
+    if (!ORDER_STATUSES.includes(body.status)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 });
     }
 
     await dbConnect();
-    const order = await Order.findByIdAndUpdate(
-      id,
-      {
-        status: body.status,
-        // Stamp serve time for future fulfilment-time stats; clear it on Undo
-        // so a re-served order measures its latest cycle.
-        servedAt: body.status === "served" ? new Date() : null,
-      },
-      { new: true }
-    );
+
+    // Lifecycle: pending -> completed (kitchen made it) -> served (handed to a
+    // waiter). Backwards moves (Undo) are allowed, and clear the stamps so a
+    // re-run measures its latest cycle.
+    const now = new Date();
+    const updates = { status: body.status };
+    if (body.status === "completed") {
+      updates.completedAt = now;
+      updates.servedAt = null;
+    } else if (body.status === "served") {
+      updates.servedAt = now;
+    } else {
+      updates.completedAt = null;
+      updates.servedAt = null;
+    }
+
+    const order = await Order.findByIdAndUpdate(id, updates, { new: true });
 
     if (!order) {
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
