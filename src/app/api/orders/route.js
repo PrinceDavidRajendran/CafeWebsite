@@ -77,9 +77,9 @@ export async function POST(request) {
 
     let addOns = [];
     if (body.addOns !== undefined) {
-      if (!Array.isArray(body.addOns) || body.addOns.length > 6) {
+      if (!Array.isArray(body.addOns) || body.addOns.length > 10) {
         return NextResponse.json(
-          { error: "addOns must be an array of at most 6 items" },
+          { error: "addOns must be an array of at most 10 items" },
           { status: 400 }
         );
       }

@@ -3,18 +3,45 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-const DRINKS = [
-  "Espresso",
-  "Latte",
-  "Cappuccino",
-  "Long Black",
-  "Flat White",
-  "Hot Chocolate",
-  "Iced Chocolate",
-  "Iced Coffee",
-  "Iced Milo",
-  "Wagh Bakri Special Tea",
+const DRINK_CATEGORIES = [
+  {
+    key: "Coffees",
+    label: "Coffees",
+    meta: "Hot & iced",
+    dot: "var(--color-terracotta)",
+    glyph: "☕",
+    drinks: [
+      "Cappuccino",
+      "Flat White",
+      "Latte",
+      "Mocha",
+      "Short Black",
+      "Long Black",
+      "Espresso",
+      "Double Espresso",
+      "Iced Coffee",
+      "Iced Mocha",
+    ],
+  },
+  {
+    key: "General Hot Drinks",
+    label: "General Hot Drinks",
+    meta: "Hot choc · Milo · Tea",
+    dot: "var(--color-caramel)",
+    glyph: "🍵",
+    drinks: ["Hot Chocolate", "Hot Milo", "Hot Tea"],
+  },
+  {
+    key: "General Iced Drinks",
+    label: "General Iced Drinks",
+    meta: "Iced choc · Milo",
+    dot: "var(--color-tag-elder)",
+    glyph: "🧊",
+    drinks: ["Iced Chocolate", "Iced Milo"],
+  },
 ];
+
+const DRINKS = DRINK_CATEGORIES.flatMap((c) => c.drinks);
 
 const SIZES = ["S", "M", "L"];
 
@@ -28,11 +55,13 @@ const TAGS = [
 ];
 
 const ADD_ONS = [
-  "Whipped Cream",
-  "Less Condensed Milk",
+  "Extra Shot",
   "Extra Sugar",
+  "Caramel Syrup",
+  "Vanilla Syrup",
+  "Hazelnut Syrup",
+  "Whipped Cream",
   "Ice Cream",
-  "Marshmallow",
 ];
 
 export default function OrderPage() {
@@ -281,33 +310,54 @@ export default function OrderPage() {
             title="Drink"
             meta={drink ? `Selected · ${drink}` : `${DRINKS.length} on the menu`}
           />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-            {DRINKS.map((d, i) => {
-              const active = drink === d;
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setDrink(d)}
-                  className={`relative flex items-center justify-between px-5 py-4 rounded-2xl
-                              text-left transition-all duration-200
-                              ${active
-                                ? "bg-gradient-to-br from-terracotta to-caramel-deep text-cream shadow-lg -translate-y-0.5"
-                                : "bg-cream-soft text-espresso hover:bg-foam/40 hover:-translate-y-0.5"}`}
-                >
-                  <span className="font-display text-lg leading-tight flex items-center gap-2.5">
-                    <span aria-hidden>{drinkGlyph(d)}</span>
-                    {d}
-                  </span>
+          <div className="space-y-6 mt-5">
+            {DRINK_CATEGORIES.map((category) => (
+              <div key={category.key}>
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3 pl-1">
                   <span
-                    className={`font-mono text-[10px] tabular-nums tracking-wider px-2 py-1 rounded-full
-                                ${active ? "bg-cream/20 text-cream" : "bg-paper text-mocha"}`}
-                  >
-                    {String(i + 1).padStart(2, "0")}
-                  </span>
-                </button>
-              );
-            })}
+                    className="block w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ background: category.dot }}
+                  />
+                  <h3 className="font-ui text-xs font-semibold uppercase tracking-[0.18em] text-espresso-soft">
+                    <span aria-hidden className="mr-1.5">
+                      {category.glyph}
+                    </span>
+                    {category.label}
+                  </h3>
+                  <span className="label-mono">{category.meta}</span>
+                  <div className="flex-1 h-px bg-foam/60" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {category.drinks.map((d) => {
+                    const active = drink === d;
+                    const idx = DRINKS.indexOf(d);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setDrink(d)}
+                        className={`relative flex items-center justify-between px-5 py-4 rounded-2xl
+                                    text-left transition-all duration-200
+                                    ${active
+                                      ? "bg-gradient-to-br from-terracotta to-caramel-deep text-cream shadow-lg -translate-y-0.5"
+                                      : "bg-cream-soft text-espresso hover:bg-foam/40 hover:-translate-y-0.5"}`}
+                      >
+                        <span className="font-display text-lg leading-tight flex items-center gap-2.5">
+                          <span aria-hidden>{drinkGlyph(d)}</span>
+                          {d}
+                        </span>
+                        <span
+                          className={`font-mono text-[10px] tabular-nums tracking-wider px-2 py-1 rounded-full
+                                      ${active ? "bg-cream/20 text-cream" : "bg-paper text-mocha"}`}
+                        >
+                          {String(idx + 1).padStart(2, "0")}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -506,9 +556,9 @@ function SectionHeader({ index, title, meta }) {
 
 function drinkGlyph(name) {
   const n = (name || "").toLowerCase();
+  if (n.includes("iced")) return "🧊";
   if (n.includes("tea")) return "🍵";
   if (n.includes("milo") || n.includes("chocolate")) return "🍫";
-  if (n.includes("iced")) return "🧊";
   if (n.includes("espresso")) return "⚡";
   return "☕";
 }

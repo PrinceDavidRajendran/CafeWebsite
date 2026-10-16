@@ -14,27 +14,70 @@ const TAG_CONFIG = {
 
 const TAG_ORDER = ["Guest", "Pastor", "Elder", "Adult", "Youth", "Children"];
 
-// Two production stations. The board is split so each team only sees the
-// drinks it is responsible for, still ordered by tag priority within a station.
+// Three production categories. The board is split so each team only sees the
+// drinks it is responsible for, still ordered by tag priority within a category.
 const STATION_DRINKS = {
-  "Chocolate & Milo": ["hot chocolate", "iced chocolate", "iced milo"],
-  "Coffee & Tea": null, // null === everything else
+  Coffees: [
+    "cappuccino",
+    "flat white",
+    "latte",
+    "mocha",
+    "short black",
+    "long black",
+    "espresso",
+    "double espresso",
+    "iced coffee",
+    "iced mocha",
+  ],
+  "General Hot Drinks": [
+    "hot chocolate",
+    "hot milo",
+    "hot tea",
+    "wagh bakri special tea",
+  ],
+  "General Iced Drinks": [
+    "iced chocolate",
+    "iced milo",
+  ],
 };
 
-const STATION_ORDER = ["Chocolate & Milo", "Coffee & Tea"];
+const STATION_ORDER = [
+  "Coffees",
+  "General Hot Drinks",
+  "General Iced Drinks",
+];
 
 const STATION_CONFIG = {
-  "Chocolate & Milo": { dot: "var(--color-caramel)", glyph: "🍫" },
-  "Coffee & Tea": { dot: "var(--color-tag-elder)", glyph: "☕" },
+  Coffees: {
+    dot: "var(--color-terracotta)",
+    glyph: "☕",
+    subtitle: "Hot & iced",
+  },
+  "General Hot Drinks": {
+    dot: "var(--color-caramel)",
+    glyph: "🍵",
+    subtitle: "Hot choc · Milo · Tea",
+  },
+  "General Iced Drinks": {
+    dot: "var(--color-tag-elder)",
+    glyph: "🧊",
+    subtitle: "Iced choc · Milo",
+  },
 };
 
 function stationOf(drink) {
-  const n = (drink || "").toLowerCase();
+  const n = (drink || "").trim().toLowerCase();
   for (const station of STATION_ORDER) {
     const drinks = STATION_DRINKS[station];
     if (drinks && drinks.includes(n)) return station;
   }
-  return STATION_ORDER[1];
+  if (n.includes("iced") && (n.includes("choc") || n.includes("milo"))) {
+    return "General Iced Drinks";
+  }
+  if (n.includes("choc") || n.includes("milo") || n.includes("tea")) {
+    return "General Hot Drinks";
+  }
+  return "Coffees";
 }
 
 function timeAgo(dateStr) {
@@ -243,7 +286,7 @@ export default function DisplayPage() {
           {
             key: "all",
             label: "Service log",
-            config: STATION_CONFIG["Coffee & Tea"],
+            config: { dot: "var(--color-tag-elder)", glyph: "☕" },
             groups: TAG_ORDER.map((tagName) => ({
               key: tagName,
               tag: tagName,
@@ -473,6 +516,7 @@ export default function DisplayPage() {
                   </h2>
                   <span className="label-mono">
                     {stationCount} order{stationCount !== 1 ? "s" : ""}
+                    {station.config.subtitle ? ` · ${station.config.subtitle}` : ""}
                   </span>
                   {isCollapsed && stationCount > 0 && (
                     <span className="chip border-terracotta text-terracotta-deep">{stationCount} waiting</span>
@@ -772,9 +816,9 @@ function OrderTicket({ order, dot, mode, large = false, onCompleted, onServed, o
 
 function drinkGlyph(name) {
   const n = (name || "").toLowerCase();
+  if (n.includes("iced")) return "🧊";
   if (n.includes("tea")) return "🍵";
   if (n.includes("milo") || n.includes("chocolate")) return "🍫";
-  if (n.includes("iced")) return "🧊";
   if (n.includes("espresso")) return "⚡";
   return "☕";
 }

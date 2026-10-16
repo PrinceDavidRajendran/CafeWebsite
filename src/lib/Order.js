@@ -23,8 +23,8 @@ const OrderSchema = new mongoose.Schema({
   addOns: {
     type: [{ type: String, maxlength: 40 }],
     validate: {
-      validator: (v) => !v || v.length <= 6,
-      message: "addOns may contain at most 6 items",
+      validator: (v) => !v || v.length <= 10,
+      message: "addOns may contain at most 10 items",
     },
     default: [],
   },
